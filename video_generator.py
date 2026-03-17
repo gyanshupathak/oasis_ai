@@ -1,6 +1,6 @@
 """
 Oasis MVP 0.1 - Phase 4: Video Generation
-Seedance Lite (Pollinations I2V) only. FFmpeg fallback when Seedance fails.
+Seedance Lite (Pollinations I2V) -> Grok (Pollinations T2V) -> FFmpeg fallback.
 """
 
 import os
@@ -13,6 +13,7 @@ from config import OUTPUT_DIR
 from video_assembler import image_to_clip
 
 POLLINATIONS_SEEDANCE = "seedance"
+POLLINATIONS_GROK_VIDEO = "grok-video"
 MAX_PROMPT_CHARS = 200
 
 
@@ -172,6 +173,50 @@ def _generate_scene_video_seedance(
     return None
 
 
+def _generate_scene_video_grok(
+    visual_description: str,
+    scene_id: int,
+    duration: int,
+    output_dir: Path,
+) -> Path | None:
+    """
+    Pollinations Grok T2V (text-to-video). No image needed.
+    Returns Path or None on failure.
+    """
+    api_key = os.environ.get("POLLINATIONS_API_KEY")
+    if not api_key:
+        return None
+    desc = visual_description[:MAX_PROMPT_CHARS].strip()
+    full_prompt = f"Portrait cinematic video. {desc}. Smooth motion, Instagram Reel style, vertical 9:16."
+    encoded_prompt = quote(full_prompt, safe="")
+    clamped_duration = min(max(duration, 2), 10)
+    base_url = f"https://gen.pollinations.ai/video/{encoded_prompt}"
+    params = {
+        "model": POLLINATIONS_GROK_VIDEO,
+        "duration": clamped_duration,
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+    }
+    try:
+        r = requests.get(
+            base_url,
+            params=params,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=180,
+        )
+        if r.status_code == 200 and r.content and len(r.content) > 1000:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            out_path = output_dir / f"scene_{scene_id}.mp4"
+            with open(out_path, "wb") as f:
+                f.write(r.content)
+            print(f"  [Scene {scene_id}] Pollinations Grok (T2V) OK")
+            return out_path
+    except Exception:
+        pass
+    return None
+
+
 def _fallback_image_to_clip(
     image_path: Path, scene_id: int, duration: int, output_dir: Path
 ) -> Path:
@@ -195,15 +240,19 @@ def generate_scene_video_from_images(
     output_dir: Path = OUTPUT_DIR,
 ) -> Path:
     """
-    Generate video clip using Seedance Lite (Pollinations I2V) only.
-    FFmpeg fallback when Seedance fails.
+    Generate video clip: Seedance I2V -> Grok T2V -> FFmpeg fallback.
     """
     result = _generate_scene_video_seedance(
         visual_description, scene_id, duration, start_image_path, output_dir
     )
     if result:
         return result
-    print(f"  [Scene {scene_id}] Seedance failed, using FFmpeg fallback")
+    result = _generate_scene_video_grok(
+        visual_description, scene_id, duration, output_dir
+    )
+    if result:
+        return result
+    print(f"  [Scene {scene_id}] Pollinations failed, using FFmpeg fallback")
     return _fallback_image_to_clip(start_image_path, scene_id, duration, output_dir)
 
 

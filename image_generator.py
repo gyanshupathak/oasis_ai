@@ -43,16 +43,45 @@ def _generate_image_with_prompt(
     return output_path
 
 
+def _get_pollinations_keys() -> list[str]:
+    """
+    Return list of Pollinations API keys from environment.
+    Supports:
+    - POLLINATIONS_API_KEY
+    - POLLINATIONS_API_KEYS (comma-separated)
+    - POLLINATIONS_API_KEY_1, POLLINATIONS_API_KEY_2, ...
+    """
+    keys: list[str] = []
+    base = os.environ.get("POLLINATIONS_API_KEY")
+    if base:
+        keys.append(base)
+    multi = os.environ.get("POLLINATIONS_API_KEYS")
+    if multi:
+        for raw in multi.split(","):
+            k = raw.strip()
+            if k and k not in keys:
+                keys.append(k)
+    # Numeric suffixes (allow several alternative keys)
+    for i in range(1, 10):
+        v = os.environ.get(f"POLLINATIONS_API_KEY_{i}")
+        if v and v not in keys:
+            keys.append(v)
+    return keys
+
+
 def generate_image(
     visual_description: str,
     scene_id: int,
     output_dir: Path = OUTPUT_DIR,
 ) -> Path:
     """
-    Generate one image for a scene. Tries models in order: klein → flux.
+    Generate one image for a scene.
+    Tries models in order: klein → flux.
+    If an API key fails (e.g., blocked / rate limited), falls back to
+    additional keys exposed in the environment.
     """
-    api_key = os.environ.get("POLLINATIONS_API_KEY")
-    if not api_key:
+    api_keys = _get_pollinations_keys()
+    if not api_keys:
         raise ValueError(
             "POLLINATIONS_API_KEY not set in .env. "
             "Get free key at https://enter.pollinations.ai"
@@ -60,14 +89,14 @@ def generate_image(
     full_prompt = f"{IMAGE_PROMPT_PREFIX}{visual_description}{IMAGE_PROMPT_SUFFIX}"
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"scene_{scene_id}.png"
-    last_err = None
-    for model in IMAGE_MODELS:
+    last_err: Exception | None = None
+    for api_key in api_keys:
         try:
-            return _generate_image_with_prompt(full_prompt, out_path, api_key, model=model)
+            return _generate_image_with_model_fallback(full_prompt, out_path, api_key)
         except Exception as e:
             last_err = e
-            if model != IMAGE_MODELS[-1]:
-                print(f"  [Image] {model} failed, trying {IMAGE_MODELS[IMAGE_MODELS.index(model)+1]}...")
+            if api_key != api_keys[-1]:
+                print("  [Image] API key failed, trying next API key...")
     raise last_err or RuntimeError("Image generation failed")
 
 
@@ -108,15 +137,16 @@ def generate_single_frames(
     """
     Generate one frame per scene (for I2V - Wan/minimax use 1 image).
     Returns list of (path, path) per scene - same path for compatibility.
+    Tries multiple Pollinations API keys if available.
     """
-    api_key = os.environ.get("POLLINATIONS_API_KEY")
-    if not api_key:
+    api_keys = _get_pollinations_keys()
+    if not api_keys:
         raise ValueError(
             "POLLINATIONS_API_KEY not set in .env. "
             "Get free key at https://enter.pollinations.ai"
         )
     output_dir.mkdir(parents=True, exist_ok=True)
-    results = []
+    results: list[tuple[Path, Path]] = []
     for i, scene in enumerate(scenes):
         scene_id = scene.get("scene_id", i + 1)
         desc = scene.get("visual_description", "")
@@ -124,7 +154,18 @@ def generate_single_frames(
             raise ValueError(f"Scene {scene_id} has no visual_description")
         prompt = f"{IMAGE_PROMPT_PREFIX}{desc}. Cinematic key frame.{IMAGE_PROMPT_SUFFIX}"
         path = output_dir / f"scene_{scene_id}.png"
-        _generate_image_with_model_fallback(prompt, path, api_key)
+        last_err: Exception | None = None
+        for api_key in api_keys:
+            try:
+                _generate_image_with_model_fallback(prompt, path, api_key)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                if api_key != api_keys[-1]:
+                    print("  [Image] API key failed, trying next API key...")
+        if last_err is not None:
+            raise last_err
         results.append((path, path))  # same path (I2V uses only first frame)
     return results
 
@@ -136,15 +177,16 @@ def generate_four_frames_per_scene(
     """
     Generate 4 keyframes per scene (opening, early, late, closing).
     I2V models use 1 image - we use frame 1. Returns (path, path) for compatibility.
+    Tries multiple Pollinations API keys if available.
     """
-    api_key = os.environ.get("POLLINATIONS_API_KEY")
-    if not api_key:
+    api_keys = _get_pollinations_keys()
+    if not api_keys:
         raise ValueError(
             "POLLINATIONS_API_KEY not set in .env. "
             "Get free key at https://enter.pollinations.ai"
         )
     output_dir.mkdir(parents=True, exist_ok=True)
-    results = []
+    results: list[tuple[Path, Path]] = []
     suffixes = [
         "opening shot, beginning",
         "early moment, establishing",
@@ -156,11 +198,22 @@ def generate_four_frames_per_scene(
         desc = scene.get("visual_description", "")
         if not desc:
             raise ValueError(f"Scene {scene_id} has no visual_description")
-        paths = []
+        paths: list[Path] = []
         for j, suf in enumerate(suffixes):
             prompt = f"{IMAGE_PROMPT_PREFIX}{desc}. {suf}. Cinematic key frame.{IMAGE_PROMPT_SUFFIX}"
             path = output_dir / f"scene_{scene_id}_f{j+1}.png"
-            _generate_image_with_model_fallback(prompt, path, api_key)
+            last_err: Exception | None = None
+            for api_key in api_keys:
+                try:
+                    _generate_image_with_model_fallback(prompt, path, api_key)
+                    last_err = None
+                    break
+                except Exception as e:
+                    last_err = e
+                    if api_key != api_keys[-1]:
+                        print("  [Image] API key failed, trying next API key...")
+            if last_err is not None:
+                raise last_err
             paths.append(path)
         # I2V uses first frame; also write scene_N.png as primary for compatibility
         primary = output_dir / f"scene_{scene_id}.png"
@@ -176,15 +229,16 @@ def generate_start_end_frames(
     """
     Generate start + end frame for each scene (legacy: for interpolation).
     Returns list of (start_path, end_path) per scene.
+    Tries multiple Pollinations API keys if available.
     """
-    api_key = os.environ.get("POLLINATIONS_API_KEY")
-    if not api_key:
+    api_keys = _get_pollinations_keys()
+    if not api_keys:
         raise ValueError(
             "POLLINATIONS_API_KEY not set in .env. "
             "Get free key at https://enter.pollinations.ai"
         )
     output_dir.mkdir(parents=True, exist_ok=True)
-    results = []
+    results: list[tuple[Path, Path]] = []
     for i, scene in enumerate(scenes):
         scene_id = scene.get("scene_id", i + 1)
         desc = scene.get("visual_description", "")
@@ -194,7 +248,18 @@ def generate_start_end_frames(
         end_prompt = f"{IMAGE_PROMPT_PREFIX}{desc}. Closing shot, end of scene. Resolution moment.{IMAGE_PROMPT_SUFFIX}"
         start_path = output_dir / f"scene_{scene_id}_start.png"
         end_path = output_dir / f"scene_{scene_id}_end.png"
-        _generate_image_with_model_fallback(start_prompt, start_path, api_key)
-        _generate_image_with_model_fallback(end_prompt, end_path, api_key)
+        last_err: Exception | None = None
+        for api_key in api_keys:
+            try:
+                _generate_image_with_model_fallback(start_prompt, start_path, api_key)
+                _generate_image_with_model_fallback(end_prompt, end_path, api_key)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                if api_key != api_keys[-1]:
+                    print("  [Image] API key failed, trying next API key...")
+        if last_err is not None:
+            raise last_err
         results.append((start_path, end_path))
     return results

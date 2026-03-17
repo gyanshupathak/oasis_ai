@@ -9,7 +9,16 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from config import CROSSFADE_DURATION, IMAGE_HEIGHT, IMAGE_WIDTH, MUSIC_DIR, MUSIC_VOLUME, OUTPUT_DIR
+from config import (
+    CROSSFADE_DURATION,
+    IMAGE_HEIGHT,
+    IMAGE_WIDTH,
+    MUSIC_DIR,
+    MUSIC_VOLUME,
+    OUTPUT_DIR,
+    OUTPUT_HEIGHT,
+    OUTPUT_WIDTH,
+)
 from voiceover import (
     build_voiceover_subtitle_events,
     get_subtitle_events_from_audio,
@@ -205,15 +214,46 @@ def add_text_overlay_with_config(
 
 
 def concat_clips(clip_paths: list[Path], output_path: Path) -> None:
-    """Concatenate video clips in order. Uses crossfade when CROSSFADE_DURATION > 0."""
-    if CROSSFADE_DURATION > 0 and len(clip_paths) > 1:
-        _concat_clips_with_crossfade(clip_paths, output_path)
+    """Concatenate video clips. Pre-scale each to same format then concat (avoids x264 malloc on long reels)."""
+    if len(clip_paths) > 1:
+        _concat_clips_prescale_then_concat(clip_paths, output_path)
         return
     _concat_clips_hard_cut(clip_paths, output_path)
 
 
+def _concat_clips_prescale_then_concat(clip_paths: list[Path], output_path: Path) -> None:
+    """
+    Scale each clip to OUTPUT_WxH, H.264 (one at a time = low memory), then concat with copy.
+    No crossfade but avoids x264 malloc on long reels; produces compatible H.264 output.
+    """
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="oasis_concat_") as work_dir:
+        work_dir = Path(work_dir)
+        scaled = []
+        scale_vf = f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps=30"
+        for i, p in enumerate(clip_paths):
+            sp = work_dir / f"scaled_{i}.mp4"
+            _run_ffmpeg([
+                "-i", str(p),
+                "-vf", scale_vf,
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+                "-an", "-movflags", "+faststart",
+                str(sp),
+            ])
+            scaled.append(sp)
+        if len(scaled) == 1:
+            shutil.copy2(scaled[0], output_path)
+        else:
+            list_file = work_dir / "list.txt"
+            with open(list_file, "w", encoding="utf-8") as f:
+                for s in scaled:
+                    pstr = str(s.resolve()).replace("\\", "/")
+                    f.write(f"file '{pstr}'\n")
+            _run_ffmpeg(["-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(output_path)])
+
+
 def _concat_clips_hard_cut(clip_paths: list[Path], output_path: Path) -> None:
-    """Concatenate with hard cuts (original behavior)."""
+    """Concatenate with hard cuts (single clip)."""
     list_file = output_path.with_suffix(".concat_list.txt")
     with open(list_file, "w", encoding="utf-8") as f:
         for p in clip_paths:
@@ -229,7 +269,7 @@ def _concat_clips_hard_cut(clip_paths: list[Path], output_path: Path) -> None:
 
 
 def _concat_clips_with_crossfade(clip_paths: list[Path], output_path: Path) -> None:
-    """Concatenate clips with smooth crossfade transitions between each pair."""
+    """Concatenate clips with crossfade. Output H.264 at OUTPUT_WIDTH x OUTPUT_HEIGHT for max compatibility."""
     fade = CROSSFADE_DURATION
     durations = [_get_media_duration(p) for p in clip_paths]
     n = len(clip_paths)
@@ -237,28 +277,37 @@ def _concat_clips_with_crossfade(clip_paths: list[Path], output_path: Path) -> N
         _concat_clips_hard_cut(clip_paths, output_path)
         return
 
-    # Build xfade filter chain: [0][1]xfade -> [v01]; [v01][2]xfade -> [v012]; ...
-    # offset = when transition starts in first input = first_input_duration - fade
+    # Scale to output res; fps=30 normalizes timebase for xfade
+    scale_pad = f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps=30"
     inputs = ["-i", str(clip_paths[0].resolve())]
     for p in clip_paths[1:]:
         inputs.extend(["-i", str(p.resolve())])
 
-    prev_label = "0:v"
+    scaled_labels = [f"v{i}" for i in range(n)]
+    scale_filters = [f"[{i}:v]{scale_pad}[{scaled_labels[i]}]" for i in range(n)]
+
+    prev_label = scaled_labels[0]
     running_dur = durations[0]
-    filters = []
+    xfade_filters = []
     for i in range(1, n):
-        offset = running_dur - fade
-        if offset < 0:
-            offset = 0
-        in_label = f"{i}:v"
-        out_label = f"v{i}" if i < n - 1 else "outv"
-        filters.append(f"[{prev_label}][{in_label}]xfade=transition=fade:duration={fade}:offset={offset:.3f}[{out_label}]")
+        offset = max(0, running_dur - fade)
+        in_label = scaled_labels[i]
+        out_label = f"xf{i}" if i < n - 1 else "outv"
+        xfade_filters.append(f"[{prev_label}][{in_label}]xfade=transition=fade:duration={fade}:offset={offset:.3f}[{out_label}]")
         running_dur = running_dur + durations[i] - fade
         prev_label = out_label
 
-    filter_complex = ";".join(filters)
-    args = inputs + ["-filter_complex", filter_complex, "-map", "[outv]", "-an", str(output_path.resolve())]
-    _run_ffmpeg(args)
+    filter_complex = ";".join(scale_filters) + ";" + ";".join(xfade_filters)
+    # Try H.264 first; fallback to mpeg4 if malloc (some systems)
+    args = inputs + ["-filter_complex", filter_complex, "-map", "[outv]", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-threads", "2", "-an", "-movflags", "+faststart", str(output_path.resolve())]
+    try:
+        _run_ffmpeg(args)
+    except RuntimeError as e:
+        if "malloc" in str(e).lower() or "x264" in str(e).lower():
+            args_mpeg4 = inputs + ["-filter_complex", filter_complex, "-map", "[outv]", "-c:v", "mpeg4", "-q:v", "5", "-an", str(output_path.resolve())]
+            _run_ffmpeg(args_mpeg4)
+        else:
+            raise
 
 
 def _seconds_to_ass_time(sec: float) -> str:
@@ -419,10 +468,15 @@ def burn_in_voiceover_subtitles(
         ass_str = ass_str[0] + "\\:" + ass_str[2:]
     # Middle-center: \an5 in each Dialogue; force_style as backup
     vf = f"subtitles='{ass_str}':force_style='Alignment=5,MarginV=0,FontSize={font_size},Outline={outline}'"
+    # Scale to output res + burn subtitles; H.264 for compatibility
+    scale_first = f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2"
+    full_vf = f"{scale_first},{vf}"
     _run_ffmpeg([
         "-i", str(video_path),
-        "-vf", vf,
+        "-vf", full_vf,
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-c:a", "copy",
+        "-movflags", "+faststart",
         str(output_path),
     ])
 
@@ -494,13 +548,13 @@ def mux_audio_video(video_path: Path, audio_path: Path, output_path: Path) -> No
     # Match video length to voiceover when they differ by more than 0.5s
     if abs(video_dur - audio_dur) > 0.5:
         factor = audio_dur / video_dur
-        args.extend(["-vf", f"setpts=PTS*{factor}"])
+        args.extend(["-vf", f"setpts=PTS*{factor}", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-movflags", "+faststart"])
     else:
         args.extend(["-c:v", "copy"])
     args.extend([
         "-map", "0:v:0", "-map", "1:a:0",
         "-c:a", "aac",
-        "-t", str(audio_dur),  # Output length = voiceover length
+        "-t", str(audio_dur),
         str(output_path),
     ])
     _run_ffmpeg(args)

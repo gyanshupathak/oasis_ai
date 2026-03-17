@@ -2,6 +2,10 @@
 
 Convert LinkedIn/Twitter posts into Instagram Reels. A deterministic pipeline: Text → Scene Plan → Images → Voiceover → Video → Caption.
 
+Built with [pollinations.ai](https://pollinations.ai) for image and video generation.
+
+[![Built with pollinations.ai](https://pollinations.ai/badge)](https://pollinations.ai)
+
 ## Prerequisites
 
 - Python 3.10+

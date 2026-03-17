@@ -22,6 +22,9 @@ MAX_ON_SCREEN_WORDS = 10
 ASPECT_RATIO = "9:16"
 IMAGE_WIDTH = 1024
 IMAGE_HEIGHT = 1792
+# Final reel output: 360x640 H.264 (min memory for x264, broad compatibility)
+OUTPUT_WIDTH = 360
+OUTPUT_HEIGHT = 640
 
 # Default reel length: 30 sec (6 x 5)
 DEFAULT_REEL_LENGTH = 30

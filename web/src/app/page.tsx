@@ -241,6 +241,19 @@ export default function Home() {
             )}
           </div>
         )}
+
+        {/* Footer / Credits */}
+        <footer className="mt-16 border-t border-black/10 pt-6 pb-8 text-xs text-black/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <span>OASIS — LinkedIn to Reels</span>
+          <a
+            href="https://pollinations.ai"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 hover:text-black underline-offset-2 hover:underline"
+          >
+            <span>Built with pollinations.ai</span>
+          </a>
+        </footer>
       </main>
     </div>
   );
