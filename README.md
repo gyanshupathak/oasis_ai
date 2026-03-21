@@ -111,6 +111,8 @@ docker run --env-file .env -p 3000:3000 oasis
 
 Open [http://localhost:3000](http://localhost:3000). Use the same keys as in `.env.example`. For cloud hosts (Fly.io, Railway, Render), point the service at this `Dockerfile` and set `GEMINI_API_KEY` and `POLLINATIONS_API_KEY` in the dashboard.
 
+**Full step-by-step cloud deploy:** **[DEPLOY_PLATFORM.md](DEPLOY_PLATFORM.md)**.
+
 ## Private repo, public repo, deployment
 
 Step-by-step: **[DEPLOY_AND_REPOS.md](DEPLOY_AND_REPOS.md)** (backup to private GitHub, keep `oasis_ai` clean, realistic free hosting options).
