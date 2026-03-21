@@ -72,6 +72,15 @@ python main.py --text sample_post.txt --name "my-reel" --video-gen --no-caption
 
 Output: `output/my-reel/final.mp4`
 
+## Optional maintenance scripts
+
+From repo root (venv active, same deps as the main pipeline):
+
+```bash
+python scripts/assemble_and_fix.py output/your-run-folder 60
+python scripts/fix_final_h264.py output/your-run-folder
+```
+
 ## Deployment and two-repo workflow
 
 See [DEPLOY_AND_REPOS.md](DEPLOY_AND_REPOS.md).
