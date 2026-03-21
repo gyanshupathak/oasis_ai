@@ -97,8 +97,10 @@ def generate_voiceover(
     voice_name: str = DEFAULT_VOICE,
 ) -> Path:
     """
-    Generate audio from text. Tries Gemini TTS first; on 429 uses edge-tts.
-    Output: WAV (Gemini) or MP3 (edge-tts). FFmpeg accepts both.
+    Generate audio from text.
+    Tries Gemini TTS first; on failure (quota, 5xx, or other errors) falls back to
+    edge-tts, then gTTS as last resort.
+    Output: WAV (Gemini) or MP3 (edge-tts / gTTS). FFmpeg accepts both.
     """
     output_path = output_path or OUTPUT_DIR / "voiceover.wav"
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -110,12 +112,13 @@ def generate_voiceover(
         err_str = str(e).lower()
         if "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str:
             print("  [Voiceover] Gemini TTS quota exceeded, trying edge-tts...")
-            try:
-                return _generate_voiceover_edge_tts(full_text, output_path)
-            except Exception:
-                print("  [Voiceover] edge-tts failed, using gTTS fallback...")
-                return _generate_voiceover_gtts(full_text, output_path)
-        raise
+        else:
+            print("  [Voiceover] Gemini TTS failed, trying edge-tts...")
+        try:
+            return _generate_voiceover_edge_tts(full_text, output_path)
+        except Exception:
+            print("  [Voiceover] edge-tts failed, using gTTS fallback...")
+            return _generate_voiceover_gtts(full_text, output_path)
 
 
 def build_voiceover_from_plan(plan: dict, voiceover_on: bool = True) -> tuple[str, list[dict]]:

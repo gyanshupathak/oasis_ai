@@ -1,6 +1,6 @@
 # Oasis MVP 0.1
 
-Convert LinkedIn/Twitter posts into Instagram Reels. A deterministic pipeline: Text → Scene Plan → Images → Voiceover → Video → Caption.
+Convert LinkedIn/Twitter posts into Instagram Reels. Pipeline: **Text → Scene plan → Images → Voiceover → Video → Assembly → Caption.**
 
 Built with [pollinations.ai](https://pollinations.ai) for image and video generation.
 
@@ -8,100 +8,103 @@ Built with [pollinations.ai](https://pollinations.ai) for image and video genera
 
 ## Prerequisites
 
-- Python 3.10+
-- FFmpeg (install: `choco install ffmpeg` on Windows)
+- **Python 3.10+**
+- **FFmpeg** on `PATH` (e.g. Windows: `choco install ffmpeg`; macOS: `brew install ffmpeg`; Linux: `apt install ffmpeg`)
+- **Node.js 18+** (only if you use the Next.js UI under `web/`)
 
-## API Keys
+## API keys
 
 | Key | Used for | Get it |
 |-----|----------|--------|
-| `GEMINI_API_KEY` | Scene plan, voiceover | [Google AI Studio](https://aistudio.google.com/apikey) (free) |
-| `POLLINATIONS_API_KEY` | Images + video generation | [enter.pollinations.ai](https://enter.pollinations.ai) (3 pollen/day free) |
+| `GEMINI_API_KEY` | Scene plan, overlays, voiceover (Gemini TTS) | [Google AI Studio](https://aistudio.google.com/apikey) |
+| `POLLINATIONS_API_KEY` | Images + Pollinations video | [enter.pollinations.ai](https://enter.pollinations.ai) |
+| `REPLICATE_API_TOKEN` | Optional: AI music via Replicate | [replicate.com](https://replicate.com/account) (see `.env.example`) |
 
-## Setup
+Copy `.env.example` to `.env` and fill in values. **Do not commit `.env`.**
 
-```bash
-cd d:\Oasis
+## Setup (clone anywhere)
+
+**Windows (PowerShell):**
+
+```powershell
+cd path\to\Oasis
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env
-# Edit .env: add GEMINI_API_KEY and POLLINATIONS_API_KEY
+# Edit .env: GEMINI_API_KEY, POLLINATIONS_API_KEY
+```
+
+**macOS / Linux:**
+
+```bash
+cd path/to/Oasis
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env
 ```
 
 ## Web UI (Next.js)
 
-**Run from Oasis root** so the API can find `main.py` and `.env`:
+Run **from the repository root** so the API can find `main.py` and `.env`:
 
 ```bash
-cd d:\Oasis
-cd web
+cd path/to/Oasis/web
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000. Paste your LinkedIn post, pick a preset (30 sec / 60 sec / 24 sec), hit Create Reel, and watch the pipeline phases. The video appears below when done, with caption and hashtags.
+Open [http://localhost:3000](http://localhost:3000). Paste post text, choose a preset, run the pipeline. More detail: [web/README.md](web/README.md).
 
-## Usage
+## CLI usage
 
-**Full pipeline** (post text → final.mp4 + caption + hashtags):
+Full pipeline (post → `final.mp4` + caption + hashtags):
 
 ```bash
 python main.py --text "Your LinkedIn post here..."
-# Or from file:
 python main.py --text sample_post.txt
 ```
 
-**Options:**
-- `--name "2026 recap post"` — Folder name for this run (slug → `output/2026-recap-post/`)
-- `--video-gen` — Use Pollinations video gen (grok-video)
-- `--no-voiceover` — Skip Gemini TTS voiceover
-- `--no-caption` — Skip caption and hashtags
-- `--length 45` — Target reel length in seconds
-- `--output output` — Base output directory (run folders go inside)
-- `--phase N` — Run only phases 1..N
-- `--plan path` — Use existing scene_plan.json (output dir = plan's parent)
+**Common flags:**
 
-## Output
+| Flag | Meaning |
+|------|---------|
+| `--name "my reel"` | Output folder under `output/` (slugified) |
+| `--video-gen` | Use Pollinations video generation path |
+| `--no-voiceover` | Skip TTS |
+| `--no-caption` | Skip caption/hashtags export |
+| `--length 45` | Target reel length (seconds) |
+| `--output output` | Base output directory |
+| `--phase N` | Run phases 1..N only |
+| `--plan path` | Use existing `scene_plan.json` |
 
-Each run writes to a **separate folder** under `output/`:
+## Output layout
 
-```
-output/
-  2026-recap-post/     ← --name "2026 recap post"
-    scene_plan.json
-    scene_1.mp4, scene_2.mp4, ...
-    voiceover.wav
-    final.mp4
-    caption.txt
-    hashtags.txt
-```
+Each run writes under `output/<slug>/`:
 
-Without `--name`, the folder is auto-derived from the first line of the post.
+- `scene_plan.json`, scene images/videos, `voiceover.*`, `final.mp4`, `caption.txt`, `hashtags.txt`
 
-## Pipeline Phases
+Without `--name`, the slug is derived from the first line of the post.
 
-**With `--video-gen`** (Pollinations video instead of FFmpeg):
+## Pipeline phases (summary)
 
-| Phase | What it does |
-|-------|--------------|
-| 1 | Scene plan (Gemini) |
-| 2 | Skipped (video is text-to-video) |
-| 3 | Voiceover (Gemini TTS) |
-| 4 | Video gen (Pollinations grok-video) — one clip per scene |
-| 5 | Assemble (FFmpeg concat + mux voiceover) |
-| 6 | Caption + hashtags (optional, use `--no-caption` to skip) |
+**With `--video-gen`:** scene plan → (images may be skipped depending on mode) → voiceover → Pollinations video clips → assemble → optional caption pack.
 
-**Without `--video-gen`** (default, FFmpeg from images):
+**Without `--video-gen` (default):** scene plan → images → voiceover → per-scene video (I2V / FFmpeg fallback) → assemble → packaging.
 
-| Phase | What it does |
-|-------|--------------|
-| 1 | Scene plan |
-| 2 | Images (Pollinations flux) |
-| 3 | Voiceover |
-| 4 | Assemble (FFmpeg zoompan + text + concat + mux) |
-| 6 | Caption + hashtags |
+Details: [PIPELINE_AND_TECH.md](PIPELINE_AND_TECH.md).
 
-## Font (Video Text)
+## Font (burned subtitles)
 
-FFmpeg `drawtext` uses system fonts. On Windows, Arial is usually available. If text doesn't render, install a font and set `FONT` in `video_assembler.py` to the font name or path.
+FFmpeg `drawtext` uses system fonts. On Windows, Arial is usually available. If text does not render, set the font in `video_assembler.py` to a valid name or file path.
+
+## Private repo, public repo, deployment
+
+Step-by-step: **[DEPLOY_AND_REPOS.md](DEPLOY_AND_REPOS.md)** (backup to private GitHub, keep `oasis_ai` clean, realistic free hosting options).
+
+## More docs
+
+- [RUN.md](RUN.md) — full pipeline from UI, troubleshooting  
+- [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) — high-level overview for workflow design  

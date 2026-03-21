@@ -1,24 +1,35 @@
-# Oasis — Run the Full Pipeline (UI → Video)
+# Oasis — Run the full pipeline (UI → video)
 
 ## 1. One-time setup
 
-```powershell
-cd d:\Oasis
+**Windows (PowerShell)** — replace `path\to\Oasis` with your clone:
 
-# Python venv + deps (includes imageio-ffmpeg; no separate FFmpeg needed)
+```powershell
+cd path\to\Oasis
+
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
-# API keys
 copy .env.example .env
-# Edit .env — add GEMINI_API_KEY and POLLINATIONS_API_KEY
+# Edit .env — GEMINI_API_KEY and POLLINATIONS_API_KEY
+```
+
+**macOS / Linux:**
+
+```bash
+cd path/to/Oasis
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env
 ```
 
 ## 2. Start the web app
 
-```powershell
-cd d:\Oasis\web
+```bash
+cd web
 npm install
 npm run dev
 ```
@@ -29,34 +40,38 @@ Open **http://localhost:3000**
 
 1. Paste your LinkedIn post in the text area.
 2. Click **Create Reel**.
-3. Watch phases 1–6 (scene plan → voiceover → video gen → assembly).
+3. Wait for phases 1–6 to finish.
 4. The video appears below when done.
 
-## Pipeline (3 scenes ≈ 18 s)
+## Example pipeline (UI / video-gen style)
 
 | Phase | Task |
 |-------|------|
 | 1 | Scene planning (Gemini) |
-| 2 | Skipped (video-gen mode) |
+| 2 | May be skipped depending on mode |
 | 3 | Voiceover (Gemini TTS) |
-| 4 | Video clips (Pollinations grok-video) |
+| 4 | Video clips (Pollinations, etc.) |
 | 5 | Assembly (concat + mux voiceover) |
-| 6 | Skipped (--no-caption) |
+| 6 | Caption/hashtags (if enabled) |
 
 ## Troubleshooting
 
-- **"Pipeline exited with code X"** — Check the Console output for the traceback. Often: missing API keys, Gemini quota (429), or Pollinations limits.
-- **"final.mp4 not found"** — Pipeline failed before assembly. Re-run after fixing the error.
-- **Video doesn’t play** — Hard refresh (Ctrl+F5) or try another browser.
-- **Gemini 429** — Free tier limits (e.g. 10 TTS requests/day). Wait and retry, or upgrade.
-- **FFmpeg not found** — `pip install imageio-ffmpeg` and re-run. The bundle includes FFmpeg.
+- **Pipeline exited with code X** — Check terminal output. Often: missing API keys, Gemini quota (429), or Pollinations limits.
+- **final.mp4 not found** — Pipeline failed before assembly; fix the error and re-run.
+- **Video does not play** — Hard refresh or another browser.
+- **Gemini 429** — Free tier limits; wait or upgrade.
+- **FFmpeg not found** — Install FFmpeg on `PATH`, or rely on `imageio-ffmpeg` where the code uses it.
 
 ## CLI (no UI)
 
-```powershell
-cd d:\Oasis
-.venv\Scripts\activate
+From repo root with venv active:
+
+```bash
 python main.py --text sample_post.txt --name "my-reel" --video-gen --no-caption
 ```
 
 Output: `output/my-reel/final.mp4`
+
+## Deployment and two-repo workflow
+
+See [DEPLOY_AND_REPOS.md](DEPLOY_AND_REPOS.md).
