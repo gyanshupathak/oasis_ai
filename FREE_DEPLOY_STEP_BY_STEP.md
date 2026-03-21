@@ -31,6 +31,19 @@ Close and reopen the terminal, then check:
 cloudflared --version
 ```
 
+**Windows: “cloudflared is not recognized”** — the EXE is often here (winget does not always add `PATH`):
+
+```powershell
+& "C:\Program Files (x86)\cloudflared\cloudflared.exe" --version
+```
+
+To fix permanently, add that folder to your **user** `PATH`, then open a **new** terminal:
+
+1. Start menu → type **environment variables** → **Edit environment variables for your account**.
+2. Under **User variables**, select **Path** → **Edit** → **New**.
+3. Paste: `C:\Program Files (x86)\cloudflared`
+4. OK → OK → **close all PowerShell windows** and open a new one → `cloudflared --version`.
+
 ### Step A2 — Run Oasis locally (same as always)
 
 **Terminal 1 — Python venv (repo root `D:\Oasis`):**
