@@ -100,6 +100,17 @@ Details: [PIPELINE_AND_TECH.md](PIPELINE_AND_TECH.md).
 
 FFmpeg `drawtext` uses system fonts. On Windows, Arial is usually available. If text does not render, set the font in `video_assembler.py` to a valid name or file path.
 
+## Docker (full working UI + Python + FFmpeg)
+
+From repo root (requires [Docker](https://docs.docker.com/get-docker/)):
+
+```bash
+docker build -t oasis .
+docker run --env-file .env -p 3000:3000 oasis
+```
+
+Open [http://localhost:3000](http://localhost:3000). Use the same keys as in `.env.example`. For cloud hosts (Fly.io, Railway, Render), point the service at this `Dockerfile` and set `GEMINI_API_KEY` and `POLLINATIONS_API_KEY` in the dashboard.
+
 ## Private repo, public repo, deployment
 
 Step-by-step: **[DEPLOY_AND_REPOS.md](DEPLOY_AND_REPOS.md)** (backup to private GitHub, keep `oasis_ai` clean, realistic free hosting options).
